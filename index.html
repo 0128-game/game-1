@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>ライフ・リバーシ (Life Reversi)</title>
+    <style>
+        :root {
+            --bg-color: #2c3e50;
+            --board-color: #27ae60;
+            --cell-border: #1e8449;
+            --white-piece: #ecf0f1;
+            --black-piece: #2d3436;
+        }
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 10px; }
+        #status {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            background: rgba(0,0,0,0.3);
+        }
+        .info {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .score-box {
+            padding: 10px;
+            border-radius: 5px;
+            min-width: 100px;
+            text-align: center;
+        }
+        .white-score { background: var(--white-piece); color: black; font-weight: bold; }
+        .black-score { background: var(--black-piece); color: white; font-weight: bold; }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 50px);
+            grid-template-rows: repeat(8, 50px);
+            gap: 2px;
+            background-color: var(--cell-border);
+            border: 5px solid var(--cell-border);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .cell {
+            width: 50px;
+            height: 50px;
+            background-color: var(--board-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+        .cell:hover { background-color: #2ecc71; }
+        .piece {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            transition: transform 0.4s, background-color 0.4s;
+        }
+        .piece.white { background-color: var(--white-piece); box-shadow: 2px 2px 5px rgba(0,0,0,0.2); }
+        .piece.black { background-color: var(--black-piece); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+        .piece.spawn { transform: scale(0); animation: spawn 0.4s forwards; }
+        
+        @keyframes spawn { to { transform: scale(1); } }
+
+        .controls { margin-top: 20px; }
+        button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            background: #e67e22;
+            border: none;
+            color: white;
+            border-radius: 5px;
+        }
+        button:hover { background: #d35400; }
+    </style>
+</head>
+<body>
+
+    <h1>Life Reversi</h1>
+
+    <div id="status">白の番です（空きマスに配置してください）</div>
+
+    <div class="info">
+        <div class="score-box white-score">白 (生存): <span id="white-count">2</span></div>
+        <div class="score-box black-score">黒 (死亡): <span id="black-count">2</span></div>
+    </div>
+
+    <div id="board"></div>
+
+    <div class="controls">
+        <button onclick="resetGame()">ゲームリセット</button>
+    </div>
+
+    <script>
+        const SIZE = 8;
+        let board = Array(SIZE).fill().map(() => Array(SIZE).fill(null)); // null:空, 0:白, 1:黒
+        let currentPlayer = 0; // 0:白, 1:黒
+        let isProcessing = false;
+
+        function initGame() {
+            board = Array(SIZE).fill().map(() => Array(SIZE).fill(null));
+            // 初期配置
+            board[3][3] = 1; board[3][4] = 0;
+            board[4][3] = 0; board[4][4] = 1;
+            currentPlayer = 0;
+            render();
+            updateStatus();
+        }
+
+        function render() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            let white = 0, black = 0;
+
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.onclick = () => handleCellClick(r, c);
+
+                    if (board[r][c] !== null) {
+                        const piece = document.createElement('div');
+                        piece.className = `piece ${board[r][c] === 0 ? 'white' : 'black'}`;
+                        cell.appendChild(piece);
+                        if (board[r][c] === 0) white++; else black++;
+                    }
+                    boardEl.appendChild(cell);
+                }
+            }
+            document.getElementById('white-count').innerText = white;
+            document.getElementById('black-count').innerText = black;
+        }
+
+        async function handleCellClick(r, c) {
+            if (isProcessing || board[r][c] !== null) return;
+
+            // フェーズA: 配置
+            board[r][c] = currentPlayer;
+            render();
+            isProcessing = true;
+
+            // 少し間を置いて生態系更新へ
+            setTimeout(() => {
+                applyLifeRules();
+                render();
+                
+                currentPlayer = 1 - currentPlayer;
+                isProcessing = false;
+                updateStatus();
+                checkGameOver();
+            }, 600);
+        }
+
+        function applyLifeRules() {
+            const nextBoard = Array(SIZE).fill().map(() => Array(SIZE).fill(null));
+
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    const whiteNeighbors = countWhiteNeighbors(r, c);
+                    const currentState = board[r][c];
+
+                    // 【新・ライフゲームの4原則】に基づく判定
+                    if (currentState === null || currentState === 1) {
+                        // 誕生: 空または黒で白が3つ
+                        if (whiteNeighbors === 3) {
+                            nextBoard[r][c] = 0;
+                        } else {
+                            nextBoard[r][c] = currentState;
+                        }
+                    } else if (currentState === 0) {
+                        // 生存: 白が2か3
+                        if (whiteNeighbors === 2 || whiteNeighbors === 3) {
+                            nextBoard[r][c] = 0;
+                        } else {
+                            // 過疎(1以下) または 過密(4以上) -> 黒
+                            nextBoard[r][c] = 1;
+                        }
+                    }
+                }
+            }
+            board = nextBoard;
+        }
+
+        function countWhiteNeighbors(row, col) {
+            let count = 0;
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    if (i === 0 && j === 0) continue;
+                    const r = row + i, c = col + j;
+                    if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
+                        if (board[r][c] === 0) count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        function updateStatus() {
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = `${currentPlayer === 0 ? '白' : '黒'}の番です`;
+            
+            // パス判定（空きマスがあるか）
+            let emptyCells = 0;
+            for(let r=0; r<SIZE; r++) {
+                for(let c=0; c<SIZE; c++) {
+                    if(board[r][c] === null) emptyCells++;
+                }
+            }
+            if(emptyCells === 0) {
+                statusEl.innerText = "置ける場所がありません。パスします。";
+                setTimeout(() => {
+                    currentPlayer = 1 - currentPlayer;
+                    updateStatus();
+                    checkGameOver();
+                }, 1000);
+            }
+        }
+
+        function checkGameOver() {
+            let emptyCells = 0;
+            for(let r=0; r<SIZE; r++) {
+                for(let c=0; c<SIZE; c++) {
+                    if(board[r][c] === null) emptyCells++;
+                }
+            }
+
+            if (emptyCells === 0) {
+                const w = parseInt(document.getElementById('white-count').innerText);
+                const b = parseInt(document.getElementById('black-count').innerText);
+                let msg = `対局終了！ ${w}対${b}で`;
+                if (w > b) msg += "白の勝利！";
+                else if (b > w) msg += "黒の勝利！";
+                else msg += "引き分け！";
+                alert(msg);
+            }
+        }
+
+        function resetGame() {
+            if(confirm("ゲームをリセットしますか？")) initGame();
+        }
+
+        initGame();
+    </script>
+</body>
+</html>
